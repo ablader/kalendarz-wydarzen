@@ -1,69 +1,217 @@
-<!DOCTYPE html>
+import sqlite3
+from datetime import datetime
+from pathlib import Path
+import html
+
+MIESIACE = [
+    "stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca",
+    "lipca", "sierpnia", "września", "października", "listopada", "grudnia"
+]
+
+DNI = [
+    "poniedziałek", "wtorek", "środa", "czwartek",
+    "piątek", "sobota", "niedziela"
+]
+
+c = sqlite3.connect("events.db")
+
+rows = c.execute("""
+SELECT
+    e.id,
+    e.title,
+    e.date_start,
+    e.date_end,
+    e.time_start,
+    e.time_end,
+    e.town,
+    e.venue,
+    e.address,
+    e.source_url
+FROM events e
+WHERE e.date_start >= date('now')
+   OR e.date_end >= date('now')
+  
+ 
+ORDER BY e.date_start, e.time_start, e.title
+""").fetchall()
+
+c.close()
+
+dni = {}
+
+for row in rows:
+    (
+        event_id,
+        title,
+        date_start,
+        date_end,
+        time_start,
+        time_end,
+        town,
+        venue,
+        address,
+        source_url
+    ) = row
+
+    
+    start = datetime.strptime(date_start, "%Y-%m-%d").date()
+    dzis = datetime.today().date()
+
+    if date_end:
+        koniec = datetime.strptime(date_end, "%Y-%m-%d").date()
+    else:
+        koniec = start
+
+    # Nie pokazujemy dni, które już minęły.
+    pierwszy_dzien = max(start, dzis)
+
+    if koniec < pierwszy_dzien:
+        continue
+
+    if time_start and time_end:
+        if time_end < time_start or time_start == time_end:
+            godzina = "Godzina niepodana"
+        elif time_start in ("00:00", "01:00") and time_end in ("23:00", "23:59"):
+            godzina = "Godzina niepodana"
+        else:
+            godzina = f"{time_start}–{time_end}"
+    elif time_start:
+        godzina = time_start
+    else:
+        godzina = "Godzina niepodana"
+
+    if koniec != start:
+        zakres = f"{start.strftime('%d.%m')} → {koniec.strftime('%d.%m.%Y')}"
+    else:
+        zakres = ""
+
+    miejsce = venue or ""
+    if town:
+        miejsce += f" — {town}"
+    if address:
+        miejsce += f", {address}"
+
+    wydarzenie = {
+        "title": html.escape(title or ""),
+        "time": html.escape(godzina),
+        "place": html.escape(miejsce),
+        "range": html.escape(zakres),
+        "source_url": html.escape(source_url or "", quote=True)
+    }
+
+    
+   data = pierwszy_dzien
+
+    if koniec > start:
+        ostatni_dzien = min(
+            koniec,
+            pierwszy_dzien + __import__("datetime").timedelta(days=29)
+        )
+    else:
+        ostatni_dzien = pierwszy_dzien
+
+    while data <= ostatni_dzien:
+        dni.setdefault(data, []).append(wydarzenie)
+        data += __import__("datetime").timedelta(days=1)
+dni.setdefault(datetime.today().date(), [])
+html_dni = ""
+
+for data in sorted(dni):
+    html_dni += f"""
+    <section class="day">
+        <div class="day-header">
+            <div class="day-number">{data.day}</div>
+            <div>
+                <div class="day-month">{MIESIACE[data.month - 1]}</div>
+                <div class="day-week">{DNI[data.weekday()]}</div>
+            </div>
+        </div>
+        <div class="events">
+    """
+
+    for ev in dni[data]:
+        html_dni += f"""
+        <article class="event">
+            <div class="event-time">{ev["time"]}</div>
+            <div class="event-main">
+                <div class="event-title">{f'<a href="{ev["source_url"]}" target="_blank" rel="noopener noreferrer">{ev["title"]}</a>' if ev["source_url"] else ev["title"]}</div>
+                {f'<div class="event-range">{ev["range"]}</div>' if ev["range"] else ''}
+                <div class="event-place">{ev["place"]}</div>
+            </div>
+        </article>
+        """
+
+    html_dni += """
+        </div>
+    </section>
+    """
+
+html_page = f"""<!DOCTYPE html>
 <html lang="pl">
 <head>
 <meta charset="UTF-8">
 <title>Kalendarz wydarzeń</title>
 
 <style>
-* {
+* {{
     box-sizing: border-box;
-}
+}}
 
-body {
+body {{
     margin: 0;
     background: #f3f5f7;
     color: #20252b;
     font-family: "Segoe UI", Arial, sans-serif;
-}
+}}
 
-.container {
+.container {{
     max-width: 1100px;
     margin: 0 auto;
     padding: 35px 24px 60px;
-}
+}}
 
-.header {
+.header {{
     background: linear-gradient(135deg, #17212b, #30495d);
     color: white;
     border-radius: 22px;
     padding: 32px 36px;
     margin-bottom: 30px;
     box-shadow: 0 10px 30px rgba(0,0,0,.12);
-}
+}}
 
-.header h1 {
+.header h1 {{
     margin: 0 0 8px;
     font-size: 34px;
     font-weight: 650;
-}
+}}
 
-.header p {
+.header p {{
     margin: 0;
     opacity: .78;
     font-size: 16px;
-}
+}}
 
-.counter {
+.counter {{
     display: inline-block;
     margin-top: 20px;
     padding: 8px 15px;
     border-radius: 20px;
     background: rgba(255,255,255,.12);
     font-size: 14px;
-}
+}}
 
-.day {
+.day {{
     margin-bottom: 28px;
-}
+}}
 
-.day-header {
+.day-header {{
     display: flex;
     align-items: center;
     gap: 16px;
     margin-bottom: 12px;
-}
+}}
 
-.day-number {
+.day-number {{
     width: 58px;
     height: 58px;
     border-radius: 16px;
@@ -74,55 +222,55 @@ body {
     justify-content: center;
     font-size: 25px;
     font-weight: 700;
-}
+}}
 
-.day-month {
+.day-month {{
     font-size: 21px;
     font-weight: 650;
-}
+}}
 
-.day-week {
+.day-week {{
     margin-top: 2px;
     color: #7a838b;
     font-size: 14px;
     text-transform: capitalize;
-}
+}}
 
-.events {
+.events {{
     display: flex;
     flex-direction: column;
     gap: 9px;
-}
+}}
 
-.event {
+.event {{
     display: flex;
     background: white;
     border-radius: 14px;
     padding: 17px 20px;
     border: 1px solid #e2e6ea;
     box-shadow: 0 3px 10px rgba(0,0,0,.045);
-}
+}}
 
-.event-time {
+.event-time {{
     flex: 0 0 145px;
     color: #30495d;
     font-weight: 650;
     font-size: 14px;
     padding-top: 2px;
-}
+}}
 
-.event-main {
+.event-main {{
     flex: 1;
     min-width: 0;
-}
+}}
 
-.event-title {
+.event-title {{
     font-size: 17px;
     font-weight: 650;
     line-height: 1.35;
-}
+}}
 
-.event-range {
+.event-range {{
     display: inline-block;
     margin-top: 7px;
     padding: 4px 9px;
@@ -130,51 +278,51 @@ body {
     background: #edf2f5;
     color: #536471;
     font-size: 12px;
-}
+}}
 
-.event-place {
+.event-place {{
     margin-top: 8px;
     color: #737d86;
     font-size: 13px;
     line-height: 1.4;
-}
+}}
 
-@media (max-width: 700px) {
-    .container {
+@media (max-width: 700px) {{
+    .container {{
         padding: 18px 12px 40px;
-    }
+    }}
 
-    .header {
+    .header {{
         padding: 25px 22px;
-    }
+    }}
 
-    .header h1 {
+    .header h1 {{
         font-size: 27px;
-    }
+    }}
 
-    .event {
+    .event {{
         display: block;
-    }
+    }}
 
-    .event-time {
+    .event-time {{
         padding-bottom: 7px;
-    }
-}
+    }}
+}}
 
     .event-title a:link,
     .event-title a:visited,
     .event-title a:hover,
-    .event-title a:active {
+    .event-title a:active {{
         color: #87CEFA;
-    }
+    }}
 
     .event-title a.clicked,
     .event-title a.clicked:link,
     .event-title a.clicked:visited,
     .event-title a.clicked:hover,
-    .event-title a.clicked:active {
+    .event-title a.clicked:active {{
         color: #0000EE !important;
-    }
+    }}
 
 </style>
 </head>
@@ -186,1052 +334,26 @@ body {
 <header class="header">
     <h1>Kalendarz wydarzeń</h1>
     <p>Szklarska Poręba • Jelenia Góra • Świeradów-Zdrój • okolice</p>
-    <div class="counter">73 wydarzeń</div>
+    <div class="counter">{len(rows)} wydarzeń</div>
 </header>
 
-
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">12</div>
-            <div>
-                <div class="day-month">października</div>
-                <div class="day-week">poniedziałek</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">Godzina niepodana</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://moksial.pl/1063-moksial-koncerty-karkonoskie-w-szklarskiej-porebie" target="_blank" rel="noopener noreferrer">Koncerty Karkonoskie w Szklarskiej Porębie</a></div>
-                <div class="event-range">12.10 → 18.10.2026</div>
-                <div class="event-place">Moksial — Szklarska Poręba</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">Godzina niepodana</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://muzeum-cieplice.pl/2026/06/10/tradycje-jeleniogorskiego-lowiectwa-wystawa-czasowa-13-09-26-11-11-26/" target="_blank" rel="noopener noreferrer">„Tradycje Jeleniogórskiego Łowiectwa” wystawa czasowa</a></div>
-                <div class="event-range">12.10 → 11.11.2026</div>
-                <div class="event-place">Muzeum Przyrodnicze — Jelenia Góra, ul. Cieplicka 11A, 58-560 Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">Godzina niepodana</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://muzeum-cieplice.pl/2026/06/11/picasso-grafiki-o-rysunki-wystawa-czasowa-19-09-26-15-11-26/" target="_blank" rel="noopener noreferrer">„PICASSO – grafiki i rysunki” wystawa czasowa</a></div>
-                <div class="event-range">12.10 → 15.11.2026</div>
-                <div class="event-place">Muzeum Przyrodnicze — Jelenia Góra, ul. Cieplicka 11A, 58-560 Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">13:00–16:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://turystyczna.szklarskaporeba.pl/4301-szklarskaporeba-relacje-materii-wystawa-agnieszki-godszling-w-szklarskiej-porebie" target="_blank" rel="noopener noreferrer">„Relacje materii” – wystawa Agnieszki Godszling w Szklarskiej Porębie</a></div>
-                <div class="event-range">12.10 → 25.10.2026</div>
-                <div class="event-place"> — Szklarska Poręba, 11 Listopada 23, 58-580 Szklarska Poręba</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">Godzina niepodana</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://muzeum-cieplice.pl/2026/06/10/owady-na-pocztowkach-wystawa-czasowa-25-09-26-30-11-2026-r/" target="_blank" rel="noopener noreferrer">„Owady na pocztówkach” wystawa czasowa 25.09.26-30.11.2026 r.</a></div>
-                <div class="event-range">12.10 → 30.11.2026</div>
-                <div class="event-place">Muzeum Przyrodnicze — Jelenia Góra, ul. Cieplicka 11A, 58-560 Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">17:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://muzeumkarkonoskie.pl/spotkanie-z-jeleniogorska-rodzina-1926-1950-z-zycia-corki-irmingard/" target="_blank" rel="noopener noreferrer">Spotkanie z jeleniogórską rodziną (1926 - 1950). Z życia córki Irmingard</a></div>
-                <div class="event-range">12.10 → 18.10.2026</div>
-                <div class="event-place">Muzeum Karkonoskie — Jelenia Góra, ul. Jana Matejki 28, 58-500 Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">Godzina niepodana</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://turystyczna.szklarskaporeba.pl/4308-szklarskaporeba-joga-twarzy" target="_blank" rel="noopener noreferrer">Joga twarzy</a></div>
-                <div class="event-range">12.10 → 16.02.2027</div>
-                <div class="event-place">Moksial — Szklarska Poręba, Słowackiego 13, 58-580 Szklarska Poręba</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">08:00–16:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://moksial.pl/1082-moksial-dolacz-do-uniwersytetu-trzeciego-wieku" target="_blank" rel="noopener noreferrer">Dołącz do Uniwersytetu Trzeciego Wieku!</a></div>
-                <div class="event-range">12.10 → 31.10.2026</div>
-                <div class="event-place">UTW — Szklarska Poręba, Słowackiego 13, 58-580 Szklarska Poręba</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">09:00–16:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://moksial.pl/1074-moksial-nowy-rok-akademicki-utw-2627" target="_blank" rel="noopener noreferrer">Nowy Rok Akademicki UTW 26/27</a></div>
-                <div class="event-range">12.10 → 31.05.2027</div>
-                <div class="event-place">Moksial — Szklarska Poręba, Słowackiego 13, 58-580 Szklarska Poręba</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">Godzina niepodana</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://turystyczna.szklarskaporeba.pl/4315-szklarskaporeba-jesien-w-kinie-za-rogiem" target="_blank" rel="noopener noreferrer">Jesień w Kinie za Rogiem</a></div>
-                <div class="event-range">12.10 → 31.10.2026</div>
-                <div class="event-place">Moksial — Szklarska Poręba, Szklarska Poręba</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">19:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/wietrze-wiej...---wernisaz-548624?dataFiltra=2026-10-02" target="_blank" rel="noopener noreferrer">Wietrze wiej... - wernisaż</a></div>
-                <div class="event-range">12.10 → 31.12.2026</div>
-                <div class="event-place">Galeria Muflon JCK — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">10:00–20:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://moksial.pl/1077-moksial-nowe-warsztaty-w-moksialu" target="_blank" rel="noopener noreferrer">Nowe warsztaty w MOKSiALu!</a></div>
-                <div class="event-range">12.10 → 31.10.2026</div>
-                <div class="event-place">Moksial — Szklarska Poręba, Słowackiego 13, 58-580 Szklarska Poręba</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">09:30–16:30</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://swieradowzdroj.pl/8573-swieradowzdroj-sladami-izerskich-gwarkow-rajd-na-orientacje-wokol-dziedzictwa-gor-izerskich" target="_blank" rel="noopener noreferrer">ŚLADAMI IZERSKICH GWARKÓW - RAJD NA ORIENTACJĘ WOKÓŁ DZIEDZICTWA GÓR IZERSKICH</a></div>
-                <div class="event-range">12.10 → 18.10.2026</div>
-                <div class="event-place">GEOPARK - Kopalnia Św. Jana w Krobicy , 59-630 Krobica — Świeradów-Zdrój</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">13</div>
-            <div>
-                <div class="day-month">października</div>
-                <div class="day-week">wtorek</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">10:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://www.bilety24.pl/kup-bilet-na-dzienniki-gwiazdowe--154623?id=995174" target="_blank" rel="noopener noreferrer">Dzienniki gwiazdowe</a></div>
-                
-                <div class="event-place">Zdrojowy Teatr Animacji w Jeleniej Górze im. Bogdana Nauki — Jelenia Góra, Park Zdrojowy 1, 58-560 Jelenia Góra</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">15</div>
-            <div>
-                <div class="day-month">października</div>
-                <div class="day-week">czwartek</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">10:30</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://www.bilety24.pl/kup-bilet-na-1313-cos-na-zab-76159?id=995175" target="_blank" rel="noopener noreferrer">Coś na ząb</a></div>
-                
-                <div class="event-place">Zdrojowy Teatr Animacji w Jeleniej Górze im. Bogdana Nauki — Jelenia Góra, Park Zdrojowy 1, 58-560 Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">19:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://www.jck.pl/repertuar/" target="_blank" rel="noopener noreferrer">Ponad Chmurami</a></div>
-                
-                <div class="event-place">Sala Widowiskowa — Jelenia Góra, ul. Bankowa 28/30, 58-500 Jelenia Góra</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">16</div>
-            <div>
-                <div class="day-month">października</div>
-                <div class="day-week">piątek</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">17:30–18:30</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://swieradowzdroj.pl/8532-swieradowzdroj-noc-bibliotek-spotkanie-autorskie-z-pawlem-soltysem" target="_blank" rel="noopener noreferrer">Noc Bibliotek: spotkanie autorskie z Pawłem Sołtysem</a></div>
-                
-                <div class="event-place">Miejskie Centrum Kultury, Aktywności i Promocji Gminy STACJA KULTURY — Świeradów-Zdrój, ul. Dworcowa 1, 59-850 Świeradów-Zdrój</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">20:00–21:30</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://swieradowzdroj.pl/8489-swieradowzdroj-pablopavo-i-ludziki-w-swieradowie-zdroju" target="_blank" rel="noopener noreferrer">PABLOPAVO I LUDZIKI W ŚWIERADOWIE-ZDROJU</a></div>
-                
-                <div class="event-place">SCENA Kawiarni Bohema — Świeradów-Zdrój, ul. Konstytucji 3 Maja 1, 59-850 Świeradów-Zdrój</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">17</div>
-            <div>
-                <div class="day-month">października</div>
-                <div class="day-week">sobota</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">16:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://muzeumkarkonoskie.pl/ozywcie-karkonoskie-legendy-konkurs-plastyczny/" target="_blank" rel="noopener noreferrer">OŻYWCIE KARKONOSKIE LEGENDY! - Konkurs plastyczny</a></div>
-                
-                <div class="event-place">Muzeum Karkonoskie — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">18:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://www.bilety24.pl/kup-bilet-na--tenorzy-w-bieli-aleja-gwiazd--163461?id=980756" target="_blank" rel="noopener noreferrer">„Tenorzy w Bieli – Aleją Gwiazd”</a></div>
-                
-                <div class="event-place">Zdrojowy Teatr Animacji w Jeleniej Górze im. Bogdana Nauki — Jelenia Góra, Park Zdrojowy 1, 58-560 Jelenia Góra</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">18</div>
-            <div>
-                <div class="day-month">października</div>
-                <div class="day-week">niedziela</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">11:11</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://muflon.sobieszow.pl/ale-jazz-koncert-dla-dzieci-w-ramach-25-krokus-jazz-festiwal-18-10-2026-godz-1111/" target="_blank" rel="noopener noreferrer">ALE JAZZ! koncert dla dzieci w ramach 25. Krokus Jazz Festiwal</a></div>
-                
-                <div class="event-place">JCK Muflon — Jelenia Góra, ul. Cieplicka 172, Jelenia Góra–Sobieszów</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">11:30–13:30</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://turystyczna.szklarskaporeba.pl/4269-szklarskaporeba-koncerty-karkonoskie-2026-spotkanie-4" target="_blank" rel="noopener noreferrer">Koncerty Karkonoskie 2026 - spotkanie 4</a></div>
-                
-                <div class="event-place"> — Szklarska Poręba, Kościół pw. Niepokalanego Serca NMP w Szklarskiej Porębie Dolnej, ul. Piastowska, 58-580 Szklarska Poręba</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">13:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://www.bilety24.pl/kup-bilet-na-1313-cos-na-zab-76159?id=990101" target="_blank" rel="noopener noreferrer">Coś na ząb</a></div>
-                
-                <div class="event-place">Zdrojowy Teatr Animacji w Jeleniej Górze im. Bogdana Nauki — Jelenia Góra, Park Zdrojowy 1, 58-560 Jelenia Góra</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">20</div>
-            <div>
-                <div class="day-month">października</div>
-                <div class="day-week">wtorek</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">10:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://www.bilety24.pl/kup-bilet-na-1313-cos-na-zab-76159?id=990102" target="_blank" rel="noopener noreferrer">Coś na ząb</a></div>
-                
-                <div class="event-place">Zdrojowy Teatr Animacji w Jeleniej Górze im. Bogdana Nauki — Jelenia Góra, Park Zdrojowy 1, 58-560 Jelenia Góra</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">21</div>
-            <div>
-                <div class="day-month">października</div>
-                <div class="day-week">środa</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">10:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://www.bilety24.pl/kup-bilet-na-1313-cos-na-zab-76159?id=990103" target="_blank" rel="noopener noreferrer">Coś na ząb</a></div>
-                
-                <div class="event-place">Zdrojowy Teatr Animacji w Jeleniej Górze im. Bogdana Nauki — Jelenia Góra, Park Zdrojowy 1, 58-560 Jelenia Góra</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">22</div>
-            <div>
-                <div class="day-month">października</div>
-                <div class="day-week">czwartek</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">10:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://www.bilety24.pl/kup-bilet-na-1313-cos-na-zab-76159?id=990108" target="_blank" rel="noopener noreferrer">Coś na ząb</a></div>
-                
-                <div class="event-place">Zdrojowy Teatr Animacji w Jeleniej Górze im. Bogdana Nauki — Jelenia Góra, Park Zdrojowy 1, 58-560 Jelenia Góra</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">23</div>
-            <div>
-                <div class="day-month">października</div>
-                <div class="day-week">piątek</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">19:00–20:30</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://moksial.pl/1076-moksial-sklep-z-facetami-komedia-teatralna-w-szklarskiej-porebie" target="_blank" rel="noopener noreferrer">„Sklep z facetami” – komedia teatralna w Szklarskiej Porębie</a></div>
-                
-                <div class="event-place">4 Peron — Szklarska Poręba, ul. Dworcowa 10, 58-580 Szklarska Poręba</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">24</div>
-            <div>
-                <div class="day-month">października</div>
-                <div class="day-week">sobota</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">19:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://www.bilety24.pl/kup-bilet-na-1313-hemar-z-homarem-szlagiery-przedwojennego-kabaretu-76161?id=990113" target="_blank" rel="noopener noreferrer">Hemar z homarem. Szlagiery przedwojennego kabaretu</a></div>
-                
-                <div class="event-place">Zdrojowy Teatr Animacji w Jeleniej Górze im. Bogdana Nauki — Jelenia Góra, Park Zdrojowy 1, 58-560 Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">19:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/tomasz-i-teresa-marut-–-recital-fortepianowy-550670?dataFiltra=2026-10-01" target="_blank" rel="noopener noreferrer">Tomasz i Teresa Marut – recital fortepianowy</a></div>
-                
-                <div class="event-place">Filharmonia Dolnośląska im. Ludomira Różyckiego — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">19:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/xxv-krokus-jazz-festiwal---adam-baldych-european-quartet-548266?dataFiltra=2026-10-01" target="_blank" rel="noopener noreferrer">XXV Krokus Jazz Festiwal - Adam Bałdych European Quartet</a></div>
-                
-                <div class="event-place">Sala Widowiskowa JCK — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">20:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/xxv-krokus-jazz-festiwal---young-crocus-jazz-contest-–-laureat-konkursu-548273?dataFiltra=2026-10-01" target="_blank" rel="noopener noreferrer">XXV Krokus Jazz Festiwal - Young Crocus Jazz Contest – laure...</a></div>
-                
-                <div class="event-place">Klub Kwadrat, ul. Bankowa 28/30 — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">25</div>
-            <div>
-                <div class="day-month">października</div>
-                <div class="day-week">niedziela</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">13:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://www.bilety24.pl/kup-bilet-na-1313-rozbojnik-hotzenplotz-91045?id=990114" target="_blank" rel="noopener noreferrer">Rozbójnik Hotzenplotz</a></div>
-                
-                <div class="event-place">Zdrojowy Teatr Animacji w Jeleniej Górze im. Bogdana Nauki — Jelenia Góra, Park Zdrojowy 1, 58-560 Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">18:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/pierwiastek-z-milosci-550010?dataFiltra=2026-10-01" target="_blank" rel="noopener noreferrer">Pierwiastek z miłości</a></div>
-                
-                <div class="event-place">Teatr im. Cypriana Kamila Norwida- scena kawiarniana — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">19:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/xxv-krokus-jazz-festiwal----isaiah-collier-548279?dataFiltra=2026-10-01" target="_blank" rel="noopener noreferrer">XXV Krokus Jazz Festiwal -  Isaiah Collier</a></div>
-                
-                <div class="event-place">Sala Widowiskowa JCK — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">26</div>
-            <div>
-                <div class="day-month">października</div>
-                <div class="day-week">poniedziałek</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">17:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/miasto-dostepne-–-alternatywne-mapy-jeleniej-gory-–-cykl-bezplatnych-warsztatow-549552?dataFiltra=2026-10-01" target="_blank" rel="noopener noreferrer">MIASTO DOSTĘPNE – Alternatywne Mapy Jeleniej Góry – cykl bez...</a></div>
-                <div class="event-range">26.10 → 27.10.2026</div>
-                <div class="event-place">Centrum Kultury Zameczek — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">27</div>
-            <div>
-                <div class="day-month">października</div>
-                <div class="day-week">wtorek</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">18:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/dkf-klaps---mistrzowie-kina-–-andrzej-zulawski-diabel-548612?dataFiltra=2026-10-01" target="_blank" rel="noopener noreferrer">DKF Klaps - MISTRZOWIE KINA – Andrzej Żuławski &quot;Diabeł&quot;</a></div>
-                
-                <div class="event-place">JCK Sala Widowiskowa ul. Bankowa 28/30 — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">28</div>
-            <div>
-                <div class="day-month">października</div>
-                <div class="day-week">środa</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">10:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://www.bilety24.pl/kup-bilet-na--brzydkie-kaczatko--142320?id=990115" target="_blank" rel="noopener noreferrer">Brzydkie kaczątko</a></div>
-                
-                <div class="event-place">Zdrojowy Teatr Animacji w Jeleniej Górze im. Bogdana Nauki — Jelenia Góra, Park Zdrojowy 1, 58-560 Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">16:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/historia-sztuki-w-pigulce---czym-jest-sztuka,-jej-poczatki-i-czynniki-warunkujace-rozwoj-549431?dataFiltra=2026-10-01" target="_blank" rel="noopener noreferrer">Historia sztuki w pigułce - Czym jest sztuka, jej początki i...</a></div>
-                
-                <div class="event-place">Biuro Wystaw Artystycznych — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">17:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/magdalena-katarzyna-bajor-„niedom”-–-spotkanie-autorskie-549573?dataFiltra=2026-10-01" target="_blank" rel="noopener noreferrer">Magdalena Katarzyna Bajor „NIEDOM” – spotkanie autorskie</a></div>
-                
-                <div class="event-place">Centrum Kultury Zameczek — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">29</div>
-            <div>
-                <div class="day-month">października</div>
-                <div class="day-week">czwartek</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">10:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://www.bilety24.pl/kup-bilet-na--brzydkie-kaczatko--142320?id=990123" target="_blank" rel="noopener noreferrer">Brzydkie kaczątko</a></div>
-                
-                <div class="event-place">Zdrojowy Teatr Animacji w Jeleniej Górze im. Bogdana Nauki — Jelenia Góra, Park Zdrojowy 1, 58-560 Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">19:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/1984-550016?dataFiltra=2026-10-01" target="_blank" rel="noopener noreferrer">1984</a></div>
-                
-                <div class="event-place">Teatr im. Cypriana Kamila Norwida, Al. Wojska Polskiego 38 — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">30</div>
-            <div>
-                <div class="day-month">października</div>
-                <div class="day-week">piątek</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">Godzina niepodana</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://lwowekslaski.pl/wydarzenia/8420/mala-akademia-muzyki--koncert-jesienny" target="_blank" rel="noopener noreferrer">Mała Akademia Muzyki- Koncert jesienny</a></div>
-                
-                <div class="event-place"> — Lwówek Śląski</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">10:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://www.bilety24.pl/kup-bilet-na--brzydkie-kaczatko--142320?id=990124" target="_blank" rel="noopener noreferrer">Brzydkie kaczątko</a></div>
-                
-                <div class="event-place">Zdrojowy Teatr Animacji w Jeleniej Górze im. Bogdana Nauki — Jelenia Góra, Park Zdrojowy 1, 58-560 Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">17:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/upiorny-bal-w-zameczku---zabawa-halloween’owa-dla-dzieci-w-wieku-6-–-9-lat-549579?dataFiltra=2026-10-01" target="_blank" rel="noopener noreferrer">Upiorny bal w Zameczku - zabawa halloween’owa dla dzieci w w...</a></div>
-                
-                <div class="event-place">Centrum Kultury Zameczek — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">18:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/czas,-ktory-nie-nadszedl-553310?dataFiltra=2026-10-01" target="_blank" rel="noopener noreferrer">Czas, który nie nadszedł</a></div>
-                <div class="event-range">30.10 → 05.11.2026</div>
-                <div class="event-place">Kino Lot — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">18:00–19:30</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://swieradowzdroj.pl/8568-swieradowzdroj-jesienna-zaduma-zapraszamy-na-koncerty-do-stacji-kultury" target="_blank" rel="noopener noreferrer">Jesienna Zaduma: zapraszamy na koncerty do Stacji Kultury</a></div>
-                
-                <div class="event-place">Miejskie Centrum Kultury, Aktywności i Promocji Gminy STACJA KULTURY — Świeradów-Zdrój, ul. Dworcowa 1, 59-850 Świeradów-Zdrój</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">18:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/mariusz-kalamaga-mamo-papier-sie-konczy-548618?dataFiltra=2026-10-01" target="_blank" rel="noopener noreferrer">Mariusz Kałamaga Mamo! Papier się kończy!</a></div>
-                
-                <div class="event-place">Sala Widowiskowa JCK — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">19:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/1984-550022?dataFiltra=2026-10-01" target="_blank" rel="noopener noreferrer">1984</a></div>
-                
-                <div class="event-place">Teatr im. Cypriana Kamila Norwida, Al. Wojska Polskiego 38 — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">20:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/rozwazna-i-romantyczna-553321?dataFiltra=2026-10-01" target="_blank" rel="noopener noreferrer">Rozważna i romantyczna</a></div>
-                <div class="event-range">30.10 → 05.11.2026</div>
-                <div class="event-place">Kino Lot — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">31</div>
-            <div>
-                <div class="day-month">października</div>
-                <div class="day-week">sobota</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">Godzina niepodana</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://lwowekslaski.pl/wydarzenia/8421/jazzowe-zaduszki" target="_blank" rel="noopener noreferrer">Jazzowe zaduszki</a></div>
-                
-                <div class="event-place"> — Lwówek Śląski</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">10:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/sobota-w-palacu-sobieszow-545442?dataFiltra=2026-10-01" target="_blank" rel="noopener noreferrer">Sobota w Pałacu Sobieszów</a></div>
-                <div class="event-range">31.10 → 28.11.2026</div>
-                <div class="event-place">Centrum Przyrodniczo - Edukacyjne KPN - Pałac Sobieszów — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">16:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/„bal-u-ducha-gor”-–-halloweenowy-koncert-gordonowski-549651?dataFiltra=2026-10-01" target="_blank" rel="noopener noreferrer">„BAL U DUCHA GÓR” – halloweenowy koncert gordonowski</a></div>
-                
-                <div class="event-place">Centrum Kultury Zameczek — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">19:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/1984-550028?dataFiltra=2026-10-01" target="_blank" rel="noopener noreferrer">1984</a></div>
-                
-                <div class="event-place">Teatr im. Cypriana Kamila Norwida, Al. Wojska Polskiego 38 — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">19:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://www.bilety24.pl/kup-bilet-na--bezbledne-ogniki--164982?id=990515" target="_blank" rel="noopener noreferrer">„BEZBŁĘDNE OGNIKI”</a></div>
-                
-                <div class="event-place">Zdrojowy Teatr Animacji w Jeleniej Górze im. Bogdana Nauki — Jelenia Góra, Park Zdrojowy 1, 58-560 Jelenia Góra</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">1</div>
-            <div>
-                <div class="day-month">listopada</div>
-                <div class="day-week">niedziela</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">09:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/konkurs-dla-mlodziezy-na-krotki-filmik-promujacy-zakamar-550108?dataFiltra=2026-11-01" target="_blank" rel="noopener noreferrer">Konkurs dla młodzieży na krótki filmik promujący ZAKAMAR</a></div>
-                <div class="event-range">01.11 → 15.11.2026</div>
-                <div class="event-place">Wydarzenie Online — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">09:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/owady-na-pocztowkach-529628?dataFiltra=2026-11-01" target="_blank" rel="noopener noreferrer">Owady na pocztówkach</a></div>
-                <div class="event-range">01.11 → 30.11.2026</div>
-                <div class="event-place">Muzeum Przyrodnicze w Jeleniej Górze — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">09:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/picasso---grafiki-i-rysunki-529615?dataFiltra=2026-11-01" target="_blank" rel="noopener noreferrer">Picasso - grafiki i rysunki</a></div>
-                <div class="event-range">01.11 → 16.11.2026</div>
-                <div class="event-place">Muzeum Przyrodnicze w Jeleniej Górze — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">09:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/rolka-o-zakamarze-530359?dataFiltra=2026-11-01" target="_blank" rel="noopener noreferrer">Rolka o ZAKAMARze</a></div>
-                <div class="event-range">01.11 → 15.11.2026</div>
-                <div class="event-place">Wydarzenie Online — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">09:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/tradycje-jeleniogorskiego-lowiectwa-529507?dataFiltra=2026-11-01" target="_blank" rel="noopener noreferrer">Tradycje Jeleniogórskiego Łowiectwa</a></div>
-                <div class="event-range">01.11 → 11.11.2026</div>
-                <div class="event-place">Muzeum Przyrodnicze w Jeleniej Górze — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">2</div>
-            <div>
-                <div class="day-month">listopada</div>
-                <div class="day-week">poniedziałek</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">09:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/w-poszukiwaniu-pamieci---50-lat-galerii-bwa-w-jeleniej-gorze-549418?dataFiltra=2026-11-01" target="_blank" rel="noopener noreferrer">W poszukiwaniu pamięci - 50 lat Galerii BWA w Jeleniej Górze</a></div>
-                <div class="event-range">02.11 → 14.11.2026</div>
-                <div class="event-place">Biuro Wystaw Artystycznych — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">16:15</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/jak-zyc,-zeby-nie-zwariowac-553277?dataFiltra=2026-11-01" target="_blank" rel="noopener noreferrer">Jak żyć, żeby nie zwariować</a></div>
-                <div class="event-range">02.11 → 05.11.2026</div>
-                <div class="event-place">Kino Lot — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">20</div>
-            <div>
-                <div class="day-month">listopada</div>
-                <div class="day-week">piątek</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">17:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://jkm.jeleniagora.pl/pl/wydarzenia/jeleniogorskie-senioralia-2026-550855?dataFiltra=2026-11-01" target="_blank" rel="noopener noreferrer">Jeleniogórskie Senioralia 2026</a></div>
-                
-                <div class="event-place">Jelenia Góra — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">17:00–20:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://lwowekslaski.pl/wydarzenia/8422/wernisaz-w-galerii-klatka" target="_blank" rel="noopener noreferrer">Wernisaż w Galerii Klatka</a></div>
-                
-                <div class="event-place"> — Lwówek Śląski</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">19:00–20:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://swieradowzdroj.pl/8566-swieradowzdroj-bajzel-w-stacji-kultury" target="_blank" rel="noopener noreferrer">BAJZEL w Stacji Kultury</a></div>
-                
-                <div class="event-place">Miejskie Centrum Kultury, Aktywności i Promocji Gminy STACJA KULTURY — Świeradów-Zdrój, ul. Dworcowa 1, 59-850 Świeradów-Zdrój</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">26</div>
-            <div>
-                <div class="day-month">listopada</div>
-                <div class="day-week">czwartek</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">19:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://www.jck.pl/repertuar/" target="_blank" rel="noopener noreferrer">Stand-Up: Adam von Bendler</a></div>
-                
-                <div class="event-place">Sala Widowiskowa JCK — Jelenia Góra</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">29</div>
-            <div>
-                <div class="day-month">listopada</div>
-                <div class="day-week">niedziela</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">18:00–20:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://muflon.sobieszow.pl/program-artystyczny-zmyslowe-indie-%e2%88%92-wojciech-czemplik-i-przyjaciele-21-08-2026-godz-1800/" target="_blank" rel="noopener noreferrer">Program artystyczny „Zmysłowe Indie” − Wojciech Czemplik i przyjaciele</a></div>
-                
-                <div class="event-place">JCK Muflon — Jelenia Góra, ul. Cieplicka 172 Jelenia Góra</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">6</div>
-            <div>
-                <div class="day-month">grudnia</div>
-                <div class="day-week">niedziela</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">Godzina niepodana</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://lwowekslaski.pl/wydarzenia/8423/mikolajkowe-zawody-wedkarskie" target="_blank" rel="noopener noreferrer">Mikołajkowe Zawody Wędkarskie</a></div>
-                
-                <div class="event-place"> — Lwówek Śląski</div>
-            </div>
-        </article>
-        
-        <article class="event">
-            <div class="event-time">15:00–17:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://swieradowzdroj.pl/8555-swieradowzdroj-powitanie-sw-mikolaja-w-stacji-kultury" target="_blank" rel="noopener noreferrer">Powitanie św. Mikołaja w Stacji Kultury</a></div>
-                
-                <div class="event-place"> — Świeradów-Zdrój</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">11</div>
-            <div>
-                <div class="day-month">grudnia</div>
-                <div class="day-week">piątek</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">17:00–20:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://lwowekslaski.pl/wydarzenia/8424/wernisaz-w-galerii-klatka" target="_blank" rel="noopener noreferrer">Wernisaż w Galerii Klatka</a></div>
-                
-                <div class="event-place"> — Lwówek Śląski</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">13</div>
-            <div>
-                <div class="day-month">grudnia</div>
-                <div class="day-week">niedziela</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">Godzina niepodana</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://lwowekslaski.pl/wydarzenia/8425/vi-dworska-dyszka" target="_blank" rel="noopener noreferrer">VI Dworska Dyszka</a></div>
-                
-                <div class="event-place"> — Lwówek Śląski</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">17</div>
-            <div>
-                <div class="day-month">grudnia</div>
-                <div class="day-week">czwartek</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">Godzina niepodana</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://lwowekslaski.pl/wydarzenia/8426/xxix-powiatowy-konkurs-szopek-betlejemskich" target="_blank" rel="noopener noreferrer">XXIX Powiatowy Konkurs Szopek Betlejemskich</a></div>
-                
-                <div class="event-place"> — Lwówek Śląski</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">19</div>
-            <div>
-                <div class="day-month">grudnia</div>
-                <div class="day-week">sobota</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">11:00–17:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://swieradowzdroj.pl/8554-swieradowzdroj-jarmark-bozonarodzeniowy" target="_blank" rel="noopener noreferrer">Jarmark Bożonarodzeniowy</a></div>
-                
-                <div class="event-place"> — Świeradów-Zdrój</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
-    <section class="day">
-        <div class="day-header">
-            <div class="day-number">30</div>
-            <div>
-                <div class="day-month">marca</div>
-                <div class="day-week">wtorek</div>
-            </div>
-        </div>
-        <div class="events">
-    
-        <article class="event">
-            <div class="event-time">09:00</div>
-            <div class="event-main">
-                <div class="event-title"><a href="https://muzeumkarkonoskie.pl/zimowa-zmiana-godzin-wstepu/" target="_blank" rel="noopener noreferrer">Zimowa zmiana godzin wstępu</a></div>
-                
-                <div class="event-place">Muzeum Karkonoskie — Jelenia Góra, ul. Jana Matejki 28, 58-500 Jelenia Góra</div>
-            </div>
-        </article>
-        
-        </div>
-    </section>
-    
+{html_dni}
 
 </div>
 <script>
-document.querySelectorAll(".event-title a").forEach(function(link) {
-    link.addEventListener("click", function() {
+document.querySelectorAll(".event-title a").forEach(function(link) {{
+    link.addEventListener("click", function() {{
         this.classList.add("clicked");
-    });
-});
+    }});
+}});
 </script>
 </body>
 </html>
+"""
+
+Path("kalendarz_wydarzen.html").write_text(
+    html_page,
+    encoding="utf-8"
+)
+
+print("Utworzono: kalendarz_wydarzen.html")
